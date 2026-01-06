@@ -24,18 +24,13 @@ fi
 
 
 echo "adding pubkey in server1 and update host.ini file with your information..."
-read -p "type your server1 ip : " SERVER1_IP
-read -p "type your server port: " SERVER1_PORT
-read -p "type your ssh user: " USER
+read -p "Enter your server1 ip : " SERVER1_IP
+read -p "Enter your server1 port: " SERVER1_PORT
+read -p "Enter your ssh user: " USER
 read -p "Enter Server2 IP: " SERVER2_IP
 read -p "Enter Server2 SSH Port: " SERVER2_PORT
 read -s -p "Enter Server2 root password: " SERVER2_PASSWORD
 echo ""
-
-
-
-
-	
 
 
 sed -i "s/^server2_ssh_password *= *.*/server2_ssh_password=\"$SERVER2_PASSWORD\"/" "$HOST_FILE"
@@ -56,28 +51,5 @@ echo "Running Ansible playbook..."
 ansible-playbook tunnel.yaml -i host.ini
 	
 echo "Done."
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
