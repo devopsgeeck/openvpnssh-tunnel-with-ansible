@@ -34,6 +34,9 @@ if ! command -v ansible-playbook >/dev/null 2>&1; then
 	fi
 
 	pip3 install --user ansible
+        export PATH="$HOME/.local/bin:$PATH"
+        grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc || \
+          echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 
 	if ! command -v ansible-playbook >/dev/null 2>&1; then
 		err "Ansible is not installed"
@@ -58,20 +61,41 @@ read -p "$(echo -e "${YELLOW}➜ Server2 IP              : ${NC}")" SERVER2_IP
 read -p "$(echo -e "${YELLOW}➜ Server2 SSH Port        : ${NC}")" SERVER2_PORT
 read -s -p "$(echo -e "${YELLOW}➜ Server2 root password   : ${NC}")" SERVER2_PASSWORD
 echo
-
 # ===== Update host.ini =====
 echo -e "\n$LINE"
 info "Updating host.ini with provided values..."
 echo -e "$LINE\n"
 
-sed -i "s/^server2_ssh_password *= *.*/server2_ssh_password=\"$SERVER2_PASSWORD\"/" "$HOST_FILE"
-sed -i "s/^server2_ip *= *.*/server2_ip=$SERVER2_IP/" "$HOST_FILE"
-sed -i "s/^server2_ssh_port *= *.*/server2_ssh_port=$SERVER2_PORT/" "$HOST_FILE"
-sed -i "s/ansible_host=[^ ]*/ansible_host=$SERVER1_IP/" "$HOST_FILE"
-sed -i "s/ansible_port=[^ ]*/ansible_port=$SERVER1_PORT/" "$HOST_FILE"
-sed -i "s/^ansible_user=.*/ansible_user=$USER/" "$HOST_FILE"
+# Disable Bash history expansion to handle '!' in passwords
+set +H
+
+# Use a heredoc to safely replace host.ini content
+cat > "$HOST_FILE" <<EOF
+[servers]
+server1 ansible_host=$SERVER1_IP ansible_port=$SERVER1_PORT
+
+[all:vars]
+ansible_user=$USER
+server2_ip=$SERVER2_IP
+server2_ssh_port=$SERVER2_PORT
+server2_ssh_password="$SERVER2_PASSWORD"
+EOF
 
 ok "host.ini updated successfully"
+
+# ===== SSH Key Check =====
+
+echo -e "\n$LINE"
+info "Checking SSH key..."
+echo -e "$LINE\n"
+
+if [ ! -f "$HOME/.ssh/id_rsa.pub" ]; then
+    info "No SSH key found. Generating RSA 2048 key..."
+    ssh-keygen -t rsa -b 2048 -N "" -f "$HOME/.ssh/id_rsa"
+    ok "SSH key generated"
+else
+    ok "SSH key already exists"
+fi
 
 # ===== SSH Key =====
 echo -e "\n$LINE"
