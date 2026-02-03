@@ -18,21 +18,23 @@
         name: sshpass
         state: present
 
-    - name: Add key to server2 safely (via password)
+    - name: Add key to server2 (sshpass)
       shell: |
         PUBKEY="$(cat /root/.ssh/id_rsa.pub)"
-        sshpass -p '{{ server2_ssh_password }}' \
-        ssh -o StrictHostKeyChecking=no \
-            -o PreferredAuthentications=password \
-            -o PubkeyAuthentication=no \
-            -p {{ server2_ssh_port }} \
-            root@{{ server2_ip }} "
-          mkdir -p /root/.ssh &&
-          chmod 700 /root/.ssh &&
-          touch /root/.ssh/authorized_keys &&
-          chmod 600 /root/.ssh/authorized_keys &&
-          grep -qxF \"$PUBKEY\" /root/.ssh/authorized_keys || echo \"$PUBKEY\" >> /root/.ssh/authorized_keys
-        "
+        sshpass -e ssh \
+          -o StrictHostKeyChecking=no \
+          -o PreferredAuthentications=password \
+          -o PubkeyAuthentication=no \
+          -p {{ server2_ssh_port }} \
+          root@{{ server2_ip }} "
+             mkdir -p /root/.ssh &&
+             chmod 700 /root/.ssh &&
+             touch /root/.ssh/authorized_keys &&
+             chmod 600 /root/.ssh/authorized_keys &&
+             grep -qxF \"$PUBKEY\" /root/.ssh/authorized_keys || echo \"$PUBKEY\" >> /root/.ssh/authorized_keys
+           "
+      environment:
+         SSHPASS: "{{ server2_ssh_password }}"
 
     - name: Enable PermitTunnel on server1
       lineinfile:
@@ -61,7 +63,7 @@
           After=network.target
 
           [Service]
-          ExecStart=/usr/bin/ssh -NT -p {{ server2_ssh_port }} -w 0:0 root@{{ server2_ip }}
+          ExecStart=/usr/bin/ssh -NT -p {{ server2_ssh_port }} -w 2:2 root@{{ server2_ip }}
           Restart=always
           RestartSec=10
 
@@ -75,10 +77,10 @@
         enabled: yes
         state: started
 
-    - name: Configure tun0 on server1
+    - name: Configure tun2 on server1
       shell: |
-        ip addr add 10.10.10.1/30 dev tun0 || true
-        ip link set tun0 up
+        ip addr add 10.10.10.1/30 dev tun2 || true
+        ip link set tun2 up
     - sysctl:
         name: net.ipv4.ip_forward
         value: "1"
@@ -87,9 +89,8 @@
     - name: Enable ip_forward on server2
       shell: |
         ssh -p {{ server2_ssh_port }} root@{{ server2_ip }} "
-          sysctl -w net.ipv4.ip_forward=1 &&
-          grep -q net.ipv4.ip_forward /etc/sysctl.conf || \
-          echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+            sysctl -w net.ipv4.ip_forward=1 &&
+            sed -i '/^#*net.ipv4.ip_forward/c\net.ipv4.ip_forward=1' /etc/sysctl.conf
         "
     
     - name: Ensure expect is installed
@@ -188,32 +189,24 @@
   
       - name: Routing OpenVPN traffic
         shell: |
-          iptables -A FORWARD -o tun0 -j ACCEPT
-          grep -qxF "102 tun0_wan" /etc/iproute2/rt_tables || echo "102 tun0_wan" >> /etc/iproute2/rt_tables
-          ip route add default via 10.10.10.2 dev tun0 table tun0_wan || true
-          ip rule add from 10.8.0.0/24 lookup tun0_wan priority 100 || true
-          iptables -t nat -C POSTROUTING -o tun0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
+          iptables -A FORWARD -o tun2 -j ACCEPT
+          grep -qxF "102 tun2_wan" /etc/iproute2/rt_tables || echo "102 tun2_wan" >> /etc/iproute2/rt_tables
+          ip route add default via 10.10.10.2 dev tun2 table tun2_wan || true
+          ip rule add from 10.8.0.0/24 lookup tun2_wan priority 100 || true
+          iptables -t nat -C POSTROUTING -o tun2 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o tun2 -j MASQUERADE
+
       - name: Configure server2 network and firewall
         shell: |
           ssh -p {{ server2_ssh_port }} root@{{ server2_ip }} "
-            ip addr add 10.10.10.2/30 dev tun0 || true
-            ip link set tun0 up
-            iptables -t nat -C POSTROUTING -o eth0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-            iptables -C FORWARD -i tun0 -o eth0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -i tun0 -o eth0 -j ACCEPT
-            iptables -C FORWARD -i eth0 -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -i eth0 -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+            INTERFACE=$(ip -o -4 addr show | awk '{print $2}' | grep -v lo | head -n 1)
 
-            
+            ip addr add 10.10.10.2/30 dev tun2 || true
+            ip link set tun2 up
+            iptables -t nat -C POSTROUTING -o \$INTERFACE -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o \$INTERFACE -j MASQUERADE
+            iptables -C FORWARD -i tun2 -o \$INTERFACE -j ACCEPT 2>/dev/null || iptables -A FORWARD -i tun2 -o \$INTERFACE -j ACCEPT
+            iptables -C FORWARD -i \$INTERFACE -o tun2 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -i \$INTERFACE -o tun2 -m state --state RELATED,ESTABLISHED -j ACCEPT
+
             DEBIAN_FRONTEND=noninteractive apt install -y iptables-persistent
-
-          
             netfilter-persistent save
-            "
-
-
-
-
-    
-
-
-
-
+          "
+        tags: server2-firewall      
